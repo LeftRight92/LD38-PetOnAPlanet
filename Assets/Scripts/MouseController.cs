@@ -13,20 +13,13 @@ public class MouseController : MonoBehaviour {
 	[SerializeField]
 	private Button waterButton, magmaButton;
 	[SerializeField]
-	private Color waterSelected, waterUnselected, waterHover, magmaSelected, magmaUnselected, magmaHover;
+	private Sprite MagmaOn, WaterOn, MagmaOff, WaterOff;
 
 	// Use this for initialization
 	void Start () {
 		if(instance != null) Debug.LogError("OMG >1 MOUSECONTROLLER");
 		instance = this;
 		currentMouseMode = MouseMode.NONE;
-		var waterColors = waterButton.colors;
-		var magmaColors = magmaButton.colors;
-		waterColors.highlightedColor = waterHover;
-		magmaColors.highlightedColor = magmaHover;
-		waterButton.colors = waterColors;
-		magmaButton.colors = magmaColors;
-		UpdateButtons();
 	}
 	
 	// Update is called once per frame
@@ -76,26 +69,16 @@ public class MouseController : MonoBehaviour {
 	}
 
 	private void UpdateButtons() {
-		var waterColors = waterButton.colors;
-		var magmaColors = magmaButton.colors;
-		if(currentMouseMode == MouseMode.MAGMA_TOOL) {
-			waterColors.normalColor = waterUnselected;
-			waterColors.pressedColor = waterSelected;
-			magmaColors.normalColor = magmaSelected;
-			magmaColors.pressedColor = magmaUnselected;
-		} else if(currentMouseMode == MouseMode.WATER_TOOL) {
-			waterColors.normalColor = waterSelected;
-			waterColors.pressedColor = waterUnselected;
-			magmaColors.normalColor = magmaUnselected;
-			magmaColors.pressedColor = magmaSelected;
+		if(currentMouseMode == MouseMode.WATER_TOOL) {
+			waterButton.GetComponent<Image>().sprite = WaterOn;
+			magmaButton.GetComponent<Image>().sprite = MagmaOff;
+		}else if(currentMouseMode == MouseMode.MAGMA_TOOL) {
+			waterButton.GetComponent<Image>().sprite = WaterOff;
+			magmaButton.GetComponent<Image>().sprite = MagmaOn;
 		} else {
-			waterColors.normalColor = waterUnselected;
-			waterColors.pressedColor = waterSelected;
-			magmaColors.normalColor = magmaUnselected;
-			magmaColors.pressedColor = magmaSelected;
+			waterButton.GetComponent<Image>().sprite = WaterOff;
+			magmaButton.GetComponent<Image>().sprite = MagmaOff;
 		}
-		waterButton.colors = waterColors;
-		magmaButton.colors = magmaColors;
 	}
 
 	public enum MouseMode {

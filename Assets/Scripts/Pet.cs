@@ -4,39 +4,74 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
-public class Pet : MonoBehaviour {
+public class Pet : MonoBehaviour, IPetActions {
 
 	private Dictionary<Needs, Need> coreNeeds, secondaryNeeds;
 	private Plan? currentPlan;
+	private PlanElement currentAction;
+	private NeedActions? satisfyingNeed;
+	private int targetSection = -1;
+	private Biome expectedBiome;
+
+	[SerializeField]
+	private float MoveSpeed;
+	[SerializeField]
+	private float EatDrinkSpeed;
+	[SerializeField]
+	private float EatDrinkSlowSpeed;
+	[SerializeField]
+	private float SleepSpeed;
+	[SerializeField]
+	private float NeedDecaySpeed;
+	[SerializeField]
+	private float HealthLossSpeed;
+	[SerializeField]
+	private Animator animator;
+
 	[SerializeField]
 	[Range(0,10)]
 	private float CriticalNeedValue;
-	private IPlanElement currentAction;
+	public const float NeedSatisfiedValue = 9.5f;
+	[Range(0,10)]
+	[SerializeField]
+	private float SatisfyNeedBelow;
+	[Range(0, 3)]
+	[SerializeField]
+	private float TemperatureTolerance;
 
 	// Use this for initialization
 	void Start() {
 		//food, water, sleeps, temperature, happiness, health
 		coreNeeds = new Dictionary<Needs, Need>();
-		coreNeeds.Add(Needs.HUNGER, new Need(0, () => (
-			currentAction.GetType() == typeof(Eat) ? 1 : 0 - 0.05f
+		coreNeeds.Add(Needs.HUNGER, new Need(5, () => (
+			(satisfyingNeed == NeedActions.EAT ? EatDrinkSpeed :
+				satisfyingNeed == NeedActions.EAT_SLOW ? EatDrinkSlowSpeed : 0
+				- NeedDecaySpeed)
 		)));
-		coreNeeds.Add(Needs.THIRST, new Need(0, () => (
-			currentAction.GetType() == typeof(Drink) ? 1 : 0 - 0.05f
+		coreNeeds.Add(Needs.THIRST, new Need(5, () => (
+			(satisfyingNeed == NeedActions.DRINK ? EatDrinkSpeed :
+				satisfyingNeed == NeedActions.DRINK_SLOW ? EatDrinkSlowSpeed : 0
+				- NeedDecaySpeed)
 		)));
-		coreNeeds.Add(Needs.TIREDNESS, new Need(0, () => (
-			currentAction.GetType() == typeof(Sleep) ? 1 : 0 - 0.05f
+		coreNeeds.Add(Needs.TIREDNESS, new Need(5, () => (
+			(satisfyingNeed == NeedActions.SLEEP ? SleepSpeed : 0
+			- NeedDecaySpeed)
 		)));
 
 		secondaryNeeds = new Dictionary<Needs, Need>();
-		secondaryNeeds.Add(Needs.WARMTH, new Need(0, () => {
+		secondaryNeeds.Add(Needs.HAPPINESS, new Need(3, () => {
 			return 0;
 		}));
-		secondaryNeeds.Add(Needs.HAPPINESS, new Need(0, () => {
-			return 0;
-		}));
-		secondaryNeeds.Add(Needs.HEALTH, new Need(0, () => {
-			return 0;
-		}));
+		secondaryNeeds.Add(Needs.HEALTH, new Need(10, () => (
+			Mathf.Abs(Planet.instance.GetTemperatureForSection(Planet.instance.GetSectionForRotation(transform.rotation.eulerAngles.z))) > TemperatureTolerance ||
+			coreNeeds[Needs.HUNGER].value < 0.5f ||
+			coreNeeds[Needs.THIRST].value < 0.5f ||
+			coreNeeds[Needs.TIREDNESS].value < 0.05f ?
+			-HealthLossSpeed : 0
+		)));
+
+		//TESTING:
+		//currentAction = new MoveToLocation(this, 5, -1);
 	}
 
 	// Update is called once per frame
@@ -45,30 +80,163 @@ public class Pet : MonoBehaviour {
 		foreach(Need n in coreNeeds.Values) {
 			n.Update();
 		}
+		foreach(Need n in secondaryNeeds.Values) {
+			n.Update();
+		}
+		if(secondaryNeeds[Needs.HEALTH].value <= 0.01) Die();
 		if(currentAction.Update()) {
+			if(targetSection != -1) {
+				if(expectedBiome != Planet.instance.GetBiomeForSection(targetSection)) {
+					currentAction = null;
+					currentPlan = null;
+					EndSatisfyNeed();
+					FormulatePlan();
+					return;
+				}
+			}
 			if(currentPlan.Value.HasNext()) {
 				currentAction = currentPlan.Value.NextAction();
-				currentAction.Start();
 			} else {
-				currentPlan = null;
+				FormulatePlan();
 			}
 		}
+		Debug.Log(secondaryNeeds[Needs.HEALTH].value);
+	}
+
+	public void SetAnimation(string anim) {
+		animator.CrossFade(anim, 0.1f);
+		Debug.Log("SetAnimation " + anim);
+	}
+
+	public void WalkLeft() {
+		transform.parent.Rotate(new Vector3(0, 0, -MoveSpeed * Time.deltaTime));
+	}
+
+	public void WalkRight() {
+		transform.parent.Rotate(new Vector3(0, 0,  MoveSpeed * Time.deltaTime));
+	}
+
+	public bool WalkLeftCarefully(float target) {
+		if(MoveSpeed * Time.deltaTime > Mathf.Abs(target - transform.parent.rotation.eulerAngles.z)) {
+			transform.parent.rotation = Quaternion.Euler(0, 0, target);
+			return true;
+		}
+		WalkLeft();
+		return false;
+	}
+
+	public bool WalkRightCarefully(float target) {
+		if(MoveSpeed * Time.deltaTime > Mathf.Abs(target - transform.parent.rotation.eulerAngles.z)) {
+			transform.parent.rotation = Quaternion.Euler(0, 0, target);
+			return true;
+		}
+		WalkRight();
+		return false;
+	}
+
+	public int GetCurrentSection() {
+		return Planet.instance.GetSectionForRotation(transform.rotation.eulerAngles.z);
+	}
+
+	public float GetNeedValue(Needs need) {
+		if(need == Needs.HEALTH || need == Needs.HAPPINESS) return secondaryNeeds[need].value;
+		return coreNeeds[need].value;
+	}
+
+	public void StartSatisfyNeed(NeedActions action) {
+		satisfyingNeed = action;
+	}
+
+	public void EndSatisfyNeed() {
+		satisfyingNeed = null;
+	}
+
+	private void Die() {
+		SetAnimation("Dead");
+		animator.transform.Translate(1, -1.0f, 0);
+		Destroy(this);
+	}
+
+	private int GetNearestSectionForNeed(int currentSection, Needs need) {
+		if(need == Needs.HUNGER) {
+			int nearestSwamp = Planet.instance.GetNearestSectionOfType(currentSection, Biome.SWAMP);
+			int nearestForest = Planet.instance.GetNearestSectionOfType(currentSection, Biome.FOREST);
+			if(nearestSwamp == -1)
+				return nearestForest;
+			else {
+				if(nearestForest == -1)
+					return nearestSwamp;
+				else
+					return Planet.instance.DistanceBetweenTwoSectors(currentSection, nearestSwamp) < Planet.instance.DistanceBetweenTwoSectors(currentSection, nearestForest) ? nearestSwamp : nearestForest;
+			}
+		}
+		if(need == Needs.THIRST) {
+			int nearestSwamp = Planet.instance.GetNearestSectionOfType(currentSection, Biome.SWAMP);
+			int nearestLake = Planet.instance.GetNearestSectionOfType(currentSection, Biome.LAKE);
+			if(nearestSwamp == -1)
+				return nearestLake;
+			else {
+				if(nearestLake == -1)
+					return nearestSwamp;
+				else
+					return Planet.instance.DistanceBetweenTwoSectors(currentSection, nearestSwamp) < Planet.instance.DistanceBetweenTwoSectors(currentSection, nearestLake) ? nearestSwamp : nearestLake;
+			}
+		}
+		if(need == Needs.TIREDNESS) {
+			return Planet.instance.GetNearestSectionOfType(currentSection, Biome.PLAINS);
+		}
+		Debug.LogError("Bad call to GetNearestSectionForNeed " + need);
+		return -1;
 	}
 
 	private void FormulatePlan() {
-		KeyValuePair<Needs, Need> lowestNeed = coreNeeds
-			.Aggregate((currMin, n) => ( (n.Value.value) < currMin.Value.value && BiomeAvailable(n.Key) ? n : currMin));
-		Queue<IPlanElement> elements = new Queue<IPlanElement>();
-		if(lowestNeed.Value.value > CriticalNeedValue) {
+		targetSection = -1;
+		Debug.Log("Formulate Plan");
+		KeyValuePair<Needs, Need>? lowestNeed = null;
+		foreach(KeyValuePair<Needs,Need> n in coreNeeds) {
+			if(!BiomeAvailable(n.Key) || n.Value.value > SatisfyNeedBelow) continue;
+			if(!lowestNeed.HasValue || lowestNeed.Value.Value.value < n.Value.value)
+				lowestNeed = n;
+		}
+		if(!lowestNeed.HasValue) {
+			DoSpecialPlan();
+			return;
+		}
+		KeyValuePair<Needs, Need> needToSatisfy = lowestNeed.Value;
+		Queue<PlanElement> elements = new Queue<PlanElement>();
+
+		//Debug.Log(needToSatisfy.Key);
+		if(false/*needToSatisfy.Value.value > CriticalNeedValue*/) {
 			//Dawdle, or possibly consider satisfying the need for temperature
 		} else {
 			//Get a move on
 			//1) Find nearest biome that can satisfy this need
+			int currentSection = GetCurrentSection();
+			int nearestSectionForNeed = GetNearestSectionForNeed(currentSection, needToSatisfy.Key);
 			//2) Create the move left/right Plan Element
+			int travelDirection = Planet.instance.GetTravelDirection(currentSection, nearestSectionForNeed);
+			elements.Enqueue(new MoveToLocation(this, nearestSectionForNeed, travelDirection));
+			elements.Enqueue(new MoveToHotspot(this, Planet.instance.GetHotspotForSection(nearestSectionForNeed), travelDirection));
 			//3) Add the relevant SatifyNeed thingy
-			//4) Construct the Plan object
+			if(needToSatisfy.Key == Needs.HUNGER) {
+				elements.Enqueue(new Eat(this, Planet.instance.GetBiomeForSection(nearestSectionForNeed) == Biome.SWAMP));
+			}else if(needToSatisfy.Key == Needs.THIRST) {
+				elements.Enqueue(new Drink(this, Planet.instance.GetBiomeForSection(nearestSectionForNeed) == Biome.SWAMP));
+			}else if(needToSatisfy.Key == Needs.TIREDNESS) {
+				elements.Enqueue(new Sleep(this));
+				elements.Enqueue(new EndSleep(this));
+			}
+			targetSection = nearestSectionForNeed;
+			expectedBiome = Planet.instance.GetBiomeForSection(nearestSectionForNeed);
 		}
-		currentPlan = new Plan(lowestNeed.Key, elements);
+		currentPlan = new Plan(needToSatisfy.Key, elements);
+		currentAction = currentPlan.Value.NextAction();
+	}
+
+	public void DoSpecialPlan() {
+		Queue<PlanElement> queue = new Queue<PlanElement>();
+		queue.Enqueue(new DoNothing(this));
+		currentPlan = new Plan(Needs.HAPPINESS, queue);
 		currentAction = currentPlan.Value.NextAction();
 	}
 
@@ -98,11 +266,24 @@ public class Pet : MonoBehaviour {
 	}
 }
 
+public interface IPetActions {
+	void WalkLeft();
+	void WalkRight();
+	bool WalkLeftCarefully(float target);
+	bool WalkRightCarefully(float target);
+	void StartSatisfyNeed(NeedActions action);
+	void EndSatisfyNeed();
+	void SetAnimation(string anim);
+
+	float GetNeedValue(Needs need);
+	int GetCurrentSection();
+}
+
 public struct Plan {
 	Needs needToSatisfy;
-	Queue<IPlanElement> elements;
+	Queue<PlanElement> elements;
 
-	public Plan(Needs n, Queue<IPlanElement> elems) {
+	public Plan(Needs n, Queue<PlanElement> elems) {
 		needToSatisfy = n;
 		elements = elems;
 	}
@@ -111,45 +292,136 @@ public struct Plan {
 		return elements.Count > 0;
 	}
 
-	public IPlanElement NextAction() {
+	public PlanElement NextAction() {
 		if(elements.Count == 0) return null;
-		return elements.Dequeue();
+		var elem = elements.Dequeue();
+		elem.Start();
+		return elem;
 	}
 }
 
-public interface IPlanElement {
-	void Start();
-	bool Update();
+public abstract class PlanElement {
+	protected IPetActions pet;
+	public PlanElement(IPetActions pet) {
+		this.pet = pet;
+	}
+	public abstract void Start();
+	public abstract bool Update();
 }
 
-public class MoveToLocation : IPlanElement {
-	public void Start() {
-		throw new NotImplementedException();
+public class MoveToLocation : PlanElement {
+	private int targetLocation;
+	private int direction; //-1 or 1
+
+	public MoveToLocation(IPetActions pet, int target, int direction) : base(pet) {
+		targetLocation = target;
+		this.direction = direction;
 	}
 
-	public bool Update() {
-		throw new NotImplementedException();
+	public override void Start() {
+		pet.SetAnimation(direction != 1 ? "WalkLeft" : "WalkRight");
+	}
+
+	public override bool Update() {
+		if(pet.GetCurrentSection() != targetLocation) {
+			if(direction == 1)
+				pet.WalkLeft();
+			else
+				pet.WalkRight();
+			return false;
+		}
+		return true;
 	}
 }
 
-public abstract class SatisfyNeed : IPlanElement { 
-	public void Start() {
-		throw new NotImplementedException();
+public class DoNothing : PlanElement {
+	public DoNothing(IPetActions pet) : base(pet) {
+
+	}
+	public override void Start() {}
+
+	public override bool Update() {
+		return true;
+	}
+}
+
+public class MoveToHotspot : PlanElement {
+	int direction;
+	Hotspot targetHotspot;
+
+	public MoveToHotspot(IPetActions pet, Hotspot h, int direction) : base(pet) {
+		this.direction = direction;
+		targetHotspot = h;
 	}
 
-	public bool Update() {
-		throw new NotImplementedException();
+	public override void Start() {	}
+
+	public override bool Update() {
+		if(direction == 1)
+			return pet.WalkLeftCarefully(targetHotspot.transform.rotation.eulerAngles.z);
+		else
+			return pet.WalkRightCarefully(targetHotspot.transform.rotation.eulerAngles.z);
+	}
+}
+
+public abstract class SatisfyNeed : PlanElement {
+	protected NeedActions action;
+	protected Needs needToSatisfy;
+	protected string animation;
+
+	public SatisfyNeed(IPetActions pet, NeedActions action, Needs needToSatisfy) : base(pet) {
+		this.action = action;
+		this.needToSatisfy = needToSatisfy;
+	}
+
+	public override void Start() {
+		pet.StartSatisfyNeed(action);
+		pet.SetAnimation(animation);
+	}
+
+	public override bool Update() {
+		if(pet.GetNeedValue(needToSatisfy) > Pet.NeedSatisfiedValue) {
+			pet.EndSatisfyNeed();
+			return true;
+		}
+		return false;
 	}
 }
 
 public class Eat : SatisfyNeed {
 
+	public Eat(IPetActions pet, bool eatSlow) : base(pet, eatSlow ? NeedActions.EAT_SLOW : NeedActions.EAT, Needs.HUNGER) {
+		animation = eatSlow ? "EatSlow" : "Eat";
+	}
 }
 
 public class Drink : SatisfyNeed {
-
+	public Drink(IPetActions pet, bool drinkSlow) : base(pet, drinkSlow ? NeedActions.DRINK_SLOW : NeedActions.DRINK, Needs.THIRST) {
+		animation = "Drink";
+	}
 }
 
 public class Sleep : SatisfyNeed {
+	public Sleep(IPetActions pet) : base(pet, NeedActions.SLEEP, Needs.TIREDNESS) {
+		animation = "StartSleep";
+	}
+}
 
+public class EndSleep : PlanElement{
+	private float time = 0;
+
+	public EndSleep(IPetActions pet) : base(pet) {
+
+	}
+
+	public override void Start() {
+		pet.SetAnimation("EndSleep");
+	}
+
+	public override bool Update() {
+		time += Time.deltaTime;
+		if(time < 0.66) return false;
+		return true;
+	}
+	
 }
