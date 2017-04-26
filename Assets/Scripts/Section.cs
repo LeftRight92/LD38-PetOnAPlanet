@@ -4,6 +4,8 @@ using UnityEngine;
 
 public class Section : MonoBehaviour {
 
+	public const float HEAT_LEVEL = 1.0f;
+
 	public float heat {
 		get {
 			if(currentBiome == Biome.MOUNTAIN) return -2;
@@ -45,7 +47,9 @@ public class Section : MonoBehaviour {
 	
 	// Update is called once per frame
 	void Update () {
-		
+		string heatS = currentBiome == Biome.MUD00 || currentBiome == Biome.MUD01 || currentBiome == Biome.MUD10 || currentBiome == Biome.DESERT || currentBiome == Biome.MOUNTAIN ?
+				"" : GetHeatLevel();
+		GetComponent<Animator>().CrossFade("Section " + currentBiome.GetAnimationString() + heatS, 0.0000001f);
 	}
 
 	public void AddMagma() {
@@ -75,7 +79,9 @@ public class Section : MonoBehaviour {
 			//GetComponent<SpriteRenderer>().sprite = Planet.biomeMap.sprites[newBiome];
 			GameObject g = Instantiate(transitionPrefab, paffPoint.position, paffPoint.rotation);
 			Destroy(g, 1);
-			GetComponent<Animator>().CrossFade("Section " + newBiome.GetAnimationString(), 0.1f);
+			string heatS = newBiome == Biome.MUD00 || newBiome == Biome.MUD01 || newBiome == Biome.MUD10 || newBiome == Biome.DESERT || newBiome == Biome.MOUNTAIN ?
+				"" : GetHeatLevel();
+			GetComponent<Animator>().CrossFade("Section " + newBiome.GetAnimationString() + heatS, 0.1f);
 			currentBiome = newBiome;
 
 			if(newBiome == Biome.FOREST) {
@@ -91,6 +97,12 @@ public class Section : MonoBehaviour {
 			}
 			source.Play();
 		}
+	}
+
+	private string GetHeatLevel() {
+		if(heat > HEAT_LEVEL) return " Scorched";
+		if(heat < -HEAT_LEVEL) return " Frozen";
+		return "";
 	}
 
 	public Hotspot GetHotspot() {

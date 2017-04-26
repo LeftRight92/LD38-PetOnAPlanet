@@ -37,7 +37,7 @@ public class Planet : MonoBehaviour {
 			season -= 4f;
 			Year++;
 		}
-		Debug.Log(Time.deltaTime);
+		Debug.Log(sections[0].heat);
 	}
 
 	public Section GetLeftNeighbour(Section section) {
